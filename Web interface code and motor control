@@ -1,1 +1,368 @@
+// ملف: esp32_controller.ino
+// الكود مخصص للوحة ESP32 WROOM-32 للتحكم بالمحركات والسيرفو واستقبال الأوامر عبر Wi-Fi.
+
+#include <WiFi.h>
+#include <WebServer.h>
+#include <ESP32Servo.h>
+
+// =================================================================
+// 1. إعدادات الواي فاي (يجب تغييرها)
+// =================================================================
+const char* ssid = "TP-Link_C209_5G"; // يجب أن تكون نفس الشبكة المستخدمة في ESP32-CAM
+const char* password = "66998464";
+
+// =================================================================
+// 2. تعريفات الأقطاب (Pins) - بناءً على المخطط المعماري
+// =================================================================
+
+// تعريفات مشغل VNH2SP30 للجانب الأيمن (3 محركات توازي)
+#define RIGHT_MOTOR_IN_A 12 // اتجاه 1
+#define RIGHT_MOTOR_IN_B 13 // اتجاه 2
+#define RIGHT_MOTOR_PWM  14 // التحكم بالسرعة (PWM)
+
+// تعريفات مشغل VNH2SP30 للجانب الأيسر (3 محركات توازي)
+#define LEFT_MOTOR_IN_A  25 // اتجاه 1
+#define LEFT_MOTOR_IN_B  26 // اتجاه 2
+#define LEFT_MOTOR_PWM   27 // التحكم بالسرعة (PWM)
+
+// تعريفات السيرفو
+#define SERVO_PIN        32
+Servo cameraServo;
+
+// إعدادات PWM (التحكم بالسرعة)
+const int freq = 30000; // تردد PWM
+const int resolution = 8; // دقة 8 بت (0-255)
+const int rightChannel = 0;
+const int leftChannel = 1;
+int motorSpeed = 200; // السرعة الافتراضية (يمكن تغييرها من 0 إلى 255)
+
+// إعدادات السيرفو
+int servoPos = 90; // الوضع الافتراضي (المنتصف)
+
+// =================================================================
+// 3. خادم الويب
+// =================================================================
+WebServer server(80);
+
+// =================================================================
+// 4. وظائف التحكم بالمحركات
+// =================================================================
+
+void setupMotorPWM() {
+  // إعداد قنوات PWM للمحركات
+  ledcSetup(rightChannel, freq, resolution);
+  ledcAttachPin(RIGHT_MOTOR_PWM, rightChannel);
+  
+  ledcSetup(leftChannel, freq, resolution);
+  ledcAttachPin(LEFT_MOTOR_PWM, leftChannel);
+
+  // إعداد أقطاب الاتجاه كـ OUTPUT
+  pinMode(RIGHT_MOTOR_IN_A, OUTPUT);
+  pinMode(RIGHT_MOTOR_IN_B, OUTPUT);
+  pinMode(LEFT_MOTOR_IN_A, OUTPUT);
+  pinMode(LEFT_MOTOR_IN_B, OUTPUT);
+}
+
+void stopMotors() {
+  ledcWrite(rightChannel, 0);
+  ledcWrite(leftChannel, 0);
+  digitalWrite(RIGHT_MOTOR_IN_A, LOW);
+  digitalWrite(RIGHT_MOTOR_IN_B, LOW);
+  digitalWrite(LEFT_MOTOR_IN_A, LOW);
+  digitalWrite(LEFT_MOTOR_IN_B, LOW);
+}
+
+void moveForward() {
+  digitalWrite(RIGHT_MOTOR_IN_A, HIGH);
+  digitalWrite(RIGHT_MOTOR_IN_B, LOW);
+  digitalWrite(LEFT_MOTOR_IN_A, HIGH);
+  digitalWrite(LEFT_MOTOR_IN_B, LOW);
+  ledcWrite(rightChannel, motorSpeed);
+  ledcWrite(leftChannel, motorSpeed);
+}
+
+void moveBackward() {
+  digitalWrite(RIGHT_MOTOR_IN_A, LOW);
+  digitalWrite(RIGHT_MOTOR_IN_B, HIGH);
+  digitalWrite(LEFT_MOTOR_IN_A, LOW);
+  digitalWrite(LEFT_MOTOR_IN_B, HIGH);
+  ledcWrite(rightChannel, motorSpeed);
+  ledcWrite(leftChannel, motorSpeed);
+}
+
+void turnLeft() {
+  // دوران في المكان (عكس اتجاه المحركات)
+  digitalWrite(RIGHT_MOTOR_IN_A, HIGH);
+  digitalWrite(RIGHT_MOTOR_IN_B, LOW);
+  digitalWrite(LEFT_MOTOR_IN_A, LOW);
+  digitalWrite(LEFT_MOTOR_IN_B, HIGH);
+  ledcWrite(rightChannel, motorSpeed);
+  ledcWrite(leftChannel, motorSpeed);
+}
+
+void turnRight() {
+  // دوران في المكان (عكس اتجاه المحركات)
+  digitalWrite(RIGHT_MOTOR_IN_A, LOW);
+  digitalWrite(RIGHT_MOTOR_IN_B, HIGH);
+  digitalWrite(LEFT_MOTOR_IN_A, HIGH);
+  digitalWrite(LEFT_MOTOR_IN_B, LOW);
+  ledcWrite(rightChannel, motorSpeed);
+  ledcWrite(leftChannel, motorSpeed);
+}
+
+// =================================================================
+// 5. وظائف التحكم بالسيرفو
+// =================================================================
+
+void setServoPosition(int pos) {
+  servoPos = constrain(pos, 0, 180);
+  cameraServo.write(servoPos);
+}
+
+// =================================================================
+// 6. معالجات طلبات الويب (Web Handlers)
+// =================================================================
+
+void handleCommand() {
+  if (server.hasArg("cmd")) {
+    String cmd = server.arg("cmd");
+    if (cmd == "forward") {
+      moveForward();
+    } else if (cmd == "backward") {
+      moveBackward();
+    } else if (cmd == "left") {
+      turnLeft();
+    } else if (cmd == "right") {
+      turnRight();
+    } else if (cmd == "stop") {
+      stopMotors();
+    }
+    server.send(200, "text/plain", "Command received: " + cmd);
+  } else if (server.hasArg("servo")) {
+    int pos = server.arg("servo").toInt();
+    setServoPosition(pos);
+    server.send(200, "text/plain", "Servo position set to: " + String(servoPos));
+  } else {
+    server.send(400, "text/plain", "Invalid command");
+  }
+}
+
+const char MAIN_PAGE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>تحكم روبوت ESP32</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #video-stream {
+            width: 100%;
+            max-width: 600px;
+            border: 5px solid #333;
+            margin-bottom: 20px;
+        }
+        .control-area {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            max-width: 600px;
+            margin-bottom: 20px;
+        }
+        .motor-controls {
+            display: grid;
+            grid-template-areas: ". up ." "left stop right" ". down .";
+            gap: 10px;
+            width: 200px;
+        }
+        .servo-controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 200px;
+        }
+        button {
+            padding: 15px;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            background-color: #007bff;
+            color: white;
+            transition: background-color 0.2s;
+            touch-action: manipulation; /* لتحسين استجابة اللمس */
+        }
+        button:active {
+            background-color: #0056b3;
+        }
+        #forward { grid-area: up; }
+        #backward { grid-area: down; }
+        #left { grid-area: left; }
+        #right { grid-area: right; }
+        #stop { grid-area: stop; background-color: #dc3545; }
+
+        .servo-slider {
+            width: 100%;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>تحكم سيارة الروبوت</h1>
+
+    <!-- 1. بث الكاميرا -->
+    <img id="video-stream" src="" alt="بث الكاميرا">
+    <p><strong>ملاحظة:</strong> يجب التأكد من صحة عنوان IP للكاميرا في كود JavaScript.</p>
+
+    <div class="control-area">
+        <!-- 2. تحكم المحركات -->
+        <div class="motor-controls">
+            <button id="forward">أمام</button>
+            <button id="left">يسار</button>
+            <button id="stop">إيقاف</button>
+            <button id="right">يمين</button>
+            <button id="backward">خلف</button>
+        </div>
+
+        <!-- 3. تحكم السيرفو -->
+        <div class="servo-controls">
+            <h2>تحكم الكاميرا (سيرفو)</h2>
+            <input type="range" min="0" max="180" value="90" class="servo-slider" id="servo-range">
+            <p>الزاوية: <span id="servo-value">90</span> درجة</p>
+        </div>
+    </div>
+
+    <script>
+        // عنوان IP للوحة الكاميرا (ESP32-CAM)
+        // يجب تغييره يدوياً إلى عنوان IP الفعلي للوحة الكاميرا
+        const CAMERA_IP = "YOUR_CAMERA_IP_ADDRESS"; 
+        
+        // عنوان IP للوحة التحكم (ESP32 WROOM-32)
+        // بما أن صفحة الويب مستضافة على نفس اللوحة، يمكن استخدام عنوان نسبي
+        const CONTROLLER_IP = window.location.hostname; 
+
+        document.getElementById('video-stream').src = "http://" + CAMERA_IP + "/stream";
+
+        // =================================================================
+        // وظيفة إرسال أمر التحكم
+        // =================================================================
+        function sendCommand(command) {
+            fetch(`http://${CONTROLLER_IP}/command?cmd=${command}`)
+                .then(response => console.log(`Command ${command} sent.`))
+                .catch(error => console.error('Error sending command:', error));
+        }
+
+        // =================================================================
+        // وظيفة إرسال أمر السيرفو
+        // =================================================================
+        function sendServoCommand(angle) {
+            fetch(`http://${CONTROLLER_IP}/command?servo=${angle}`)
+                .then(response => console.log(`Servo angle ${angle} sent.`))
+                .catch(error => console.error('Error sending servo command:', error));
+        }
+
+        // =================================================================
+        // ربط الأزرار بوظائف التحكم
+        // =================================================================
+        document.getElementById('forward').addEventListener('touchstart', (e) => { e.preventDefault(); sendCommand('forward'); });
+        document.getElementById('backward').addEventListener('touchstart', (e) => { e.preventDefault(); sendCommand('backward'); });
+        document.getElementById('left').addEventListener('touchstart', (e) => { e.preventDefault(); sendCommand('left'); });
+        document.getElementById('right').addEventListener('touchstart', (e) => { e.preventDefault(); sendCommand('right'); });
+        
+        // عند رفع الإصبع أو ترك الزر، يتم إرسال أمر الإيقاف
+        document.querySelectorAll('.motor-controls button').forEach(button => {
+            if (button.id !== 'stop') {
+                button.addEventListener('touchend', (e) => { e.preventDefault(); sendCommand('stop'); });
+                button.addEventListener('touchcancel', (e) => { e.preventDefault(); sendCommand('stop'); });
+                
+                // دعم الماوس للكمبيوتر
+                button.addEventListener('mousedown', () => sendCommand('forward'));
+                button.addEventListener('mouseup', () => sendCommand('stop'));
+            }
+        });
+        
+        // زر الإيقاف الفوري
+        document.getElementById('stop').addEventListener('click', () => sendCommand('stop'));
+
+        // =================================================================
+        // تحكم السيرفو عبر شريط التمرير
+        // =================================================================
+        const servoRange = document.getElementById('servo-range');
+        const servoValue = document.getElementById('servo-value');
+        
+        servoRange.addEventListener('input', (e) => {
+            const angle = e.target.value;
+            servoValue.textContent = angle;
+            // إرسال الأمر عند تحريك شريط التمرير
+            sendServoCommand(angle);
+        });
+
+        // إرسال الأمر الأولي عند تحميل الصفحة
+        sendServoCommand(servoRange.value);
+
+    </script>
+</body>
+</html>
+)rawliteral";
+
+void handleRoot() {
+  server.send(200, "text/html", MAIN_PAGE);
+}
+
+// =================================================================
+// 7. دالة التهيئة (setup)
+// =================================================================
+
+void setup() {
+  // تخصيص المؤقتات للسيرفو
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  Serial.begin(115200);
+
+  // تهيئة المحركات
+  setupMotorPWM();
+  stopMotors();
+
+  // تهيئة السيرفو
+  cameraServo.attach(SERVO_PIN);
+  setServoPosition(servoPos);
+
+  // توصيل الواي فاي
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.print("Controller Ready at IP: ");
+  Serial.println(WiFi.localIP());
+
+  // إعداد معالجات الويب
+  server.on("/", handleRoot);
+  server.on("/command", handleCommand);
+  server.begin();
+}
+
+// =================================================================
+// 8. دالة الحلقة الرئيسية (loop)
+// =================================================================
+
+void loop() {
+  server.handleClient();
+}
 
