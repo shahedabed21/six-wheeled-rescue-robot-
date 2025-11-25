@@ -1,0 +1,75 @@
+
+int INA_MOTOR123 = 25;
+int INB_MOTOR123 = 26;
+int PWM_MOTOR123 = 27;
+
+int INA_MOTOR456 = 32;  
+int INB_MOTOR456 = 33;  
+int PWM_MOTOR456 = 14;  
+
+// Channels
+int channel1 = 0;
+int channel2 = 1;
+
+void setup() {
+  //  Digital Pins
+  pinMode(INA_MOTOR123, OUTPUT);
+  pinMode(INB_MOTOR123, OUTPUT);
+  pinMode(INA_MOTOR456, OUTPUT);
+  pinMode(INB_MOTOR456, OUTPUT);
+
+  // PWM Channels
+  ledcSetup(channel1, 5000, 8); // 5kHz, 8-bit resolution
+  ledcAttachPin(PWM_MOTOR123, channel1);
+
+  ledcSetup(channel2, 5000, 8);
+  ledcAttachPin(PWM_MOTOR456, channel2);
+}
+
+
+void forward() {
+  digitalWrite(INA_MOTOR123, HIGH);
+  digitalWrite(INB_MOTOR123, LOW);
+  digitalWrite(INA_MOTOR456, HIGH);
+  digitalWrite(INB_MOTOR456, LOW);
+
+  ledcWrite(channel1, 255);
+  ledcWrite(channel2, 255);
+}
+
+
+void backward() {
+  digitalWrite(INA_MOTOR123, LOW);
+  digitalWrite(INB_MOTOR123, HIGH);
+  digitalWrite(INA_MOTOR456, LOW);
+  digitalWrite(INB_MOTOR456, HIGH);
+
+  ledcWrite(channel1, 255);
+  ledcWrite(channel2, 255);
+}
+
+
+void turnRight() {
+  digitalWrite(INA_MOTOR123, HIGH);
+  digitalWrite(INB_MOTOR123, LOW);
+  digitalWrite(INA_MOTOR456, LOW);
+  digitalWrite(INB_MOTOR456, HIGH);
+
+  ledcWrite(channel1, 255);
+  ledcWrite(channel2, 255);
+}
+
+
+void turnLeft() {
+  digitalWrite(INA_MOTOR123, LOW);
+  digitalWrite(INB_MOTOR123, HIGH);
+  digitalWrite(INA_MOTOR456, HIGH);
+  digitalWrite(INB_MOTOR456, LOW);
+
+  ledcWrite(channel1, 255);
+  ledcWrite(channel2, 255);
+}
+
+void loop() {
+ 
+}
