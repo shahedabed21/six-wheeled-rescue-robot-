@@ -1,0 +1,120 @@
+/*
+ * Code to read acceleration data from MPU6050 sensor and calculate tilt angles
+ * Roll and Pitch
+ */
+
+#include <Wire.h>
+#include <MPU6050.h>
+
+MPU6050 mpu;
+
+// Calibration variables
+float ax_offset = 0;
+float ay_offset = 0;
+float az_offset = 0;
+
+// Number of readings for calibration
+const int numReadings = 100;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+  
+  Serial.println("Initializing MPU6050 sensor...");
+  
+  mpu.initialize();
+  
+  if (!mpu.testConnection()) {
+    Serial.println("MPU6050 connection failed!");
+    while (1);
+  } else {
+    Serial.println("MPU6050 connected successfully!");
+  }
+  
+  // Wait for the sensor to stabilize
+  delay(1000);
+  
+  // Calibrate the sensor
+  calibrateSensor();
+}
+
+void loop() {
+  int16_t ax, ay, az;
+  
+  // Read raw acceleration values
+  mpu.getAcceleration(&ax, &ay, &az);
+  
+  // Convert raw values to g's using sensitivity scale
+  // Assuming +/-2g = 16384 LSB/g
+  float ax_g = ax / 16384.0 - ax_offset;
+  float ay_g = ay / 16384.0 - ay_offset;
+  float az_g = az / 16384.0 - az_offset;
+  
+  // Calculate tilt angles
+  // phi (roll) = rotation angle
+  float phi = atan2(ay_g, az_g) * 180 / PI;
+  
+  // theta (pitch) = inclination angle
+  float theta = atan2(-ax_g, sqrt(ay_g * ay_g + az_g * az_g)) * 180 / PI;
+  
+  // Print the results
+  Serial.print("Acceleration (g): \t");
+  Serial.print("X: ");
+  Serial.print(ax_g, 3);
+  Serial.print("\tY: ");
+  Serial.print(ay_g, 3);
+  Serial.print("\tZ: ");
+  Serial.println(az_g, 3);
+  
+  Serial.print("Roll (phi): ");
+  Serial.print(phi, 2);
+  Serial.print(" deg\t");
+  
+  Serial.print("Pitch (theta): ");
+  Serial.print(theta, 2);
+  Serial.println(" deg");
+  
+  Serial.println("----------------------------------");
+  
+  // Wait half a second before next reading
+  delay(500);
+}
+
+void calibrateSensor() {
+  Serial.println("Calibrating sensor... Please keep the sensor stationary on a flat surface.");
+  
+  float ax_sum = 0;
+  float ay_sum = 0;
+  float az_sum = 0;
+  
+  // Take average of multiple readings to get offset values
+  for (int i = 0; i < numReadings; i++) {
+    int16_t ax, ay, az;
+    mpu.getAcceleration(&ax, &ay, &az);
+    
+    ax_sum += ax / 16384.0;
+    ay_sum += ay / 16384.0;
+    az_sum += az / 16384.0;
+    
+    delay(10);
+  }
+  
+  // Calculate average of readings
+  ax_offset = ax_sum / numReadings;
+  ay_offset = ay_sum / numReadings;
+  
+  // Z value should be 1 when sensor is on a flat surface
+  // So calculate offset based on that
+  az_offset = (az_sum / numReadings) - 1.0;
+  
+  Serial.println("Calibration completed successfully!");
+  Serial.print("Offset values: X: ");
+  Serial.print(ax_offset, 3);
+  Serial.print(" Y: ");
+  Serial.print(ay_offset, 3);
+  Serial.print(" Z: ");
+  Serial.println(az_offset, 3);
+  Serial.println("----------------------------------");
+  
+  delay(1000);
+}
