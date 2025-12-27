@@ -1,0 +1,51 @@
+#define BLYNK_TEMPLATE_ID "TMPL6V5VWyoeO"
+#define BLYNK_TEMPLATE_NAME "Car control"
+#define BLYNK_AUTH_TOKEN "JIMAUG2ENCNOh5cf-ZpXUWdfTZXkAB4D" 
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h> // تأكدي أن المكتبة مثبتة وسيختفي الإيرور
+
+// إعدادات الواي فاي
+char ssid[] = "TP-Link_C209";
+char pass[] = "66998464";
+
+// تعريفات الأقطاب
+#define RIGHT_MOTOR_IN_A 12 
+#define RIGHT_MOTOR_IN_B 13 
+#define RIGHT_MOTOR_PWM  14 
+#define LEFT_MOTOR_IN_A  25 
+#define LEFT_MOTOR_IN_B  26 
+#define LEFT_MOTOR_PWM   27 
+
+int motorSpeed =20; 
+
+void drive(int ra, int rb, int la, int lb, int speed) {
+  digitalWrite(RIGHT_MOTOR_IN_A, ra);
+  digitalWrite(RIGHT_MOTOR_IN_B, rb);
+  digitalWrite(LEFT_MOTOR_IN_A, la);
+  digitalWrite(LEFT_MOTOR_IN_B, lb);
+  analogWrite(RIGHT_MOTOR_PWM, speed);
+  analogWrite(LEFT_MOTOR_PWM, speed);
+}
+
+// أزرار تطبيق الموبايل
+BLYNK_WRITE(V0) { if(param.asInt()) drive(LOW, HIGH, HIGH, LOW, motorSpeed); else drive(LOW, LOW, LOW, LOW, 0); } // أمام
+BLYNK_WRITE(V1) { if(param.asInt()) drive(HIGH, LOW, LOW, HIGH, motorSpeed); else drive(LOW, LOW, LOW, LOW, 0); } // خلف
+BLYNK_WRITE(V2) { if(param.asInt()) drive(HIGH, LOW, HIGH, LOW, motorSpeed); else drive(LOW, LOW, LOW, LOW, 0); } // يسار
+BLYNK_WRITE(V3) { if(param.asInt()) drive(LOW, HIGH, LOW, HIGH, motorSpeed); else drive(LOW, LOW, LOW, LOW, 0); } // يمين
+
+void setup() {
+  pinMode(RIGHT_MOTOR_IN_A, OUTPUT);
+  pinMode(RIGHT_MOTOR_IN_B, OUTPUT);
+  pinMode(RIGHT_MOTOR_PWM, OUTPUT);
+  pinMode(LEFT_MOTOR_IN_A, OUTPUT);
+  pinMode(LEFT_MOTOR_IN_B, OUTPUT);
+  pinMode(LEFT_MOTOR_PWM, OUTPUT);
+
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+}
+
+void loop() {
+  Blynk.run();
+}
