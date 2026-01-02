@@ -1,0 +1,256 @@
+#if !defined(ESP32)
+#error "This code must be compiled for ESP32 only!"
+#endif
+
+// ==================== إعدادات Blynk ====================
+#define BLYNK_TEMPLATE_ID "TMPL6V5VWyoeO"
+#define BLYNK_TEMPLATE_NAME "Car control"
+#define BLYNK_AUTH_TOKEN "JIMAUG2ENCNOh5cf-ZpXUWdfTZXkAB4D" 
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h> // يجب التأكد من تثبيت هذه المكتبة
+#include <WebServer.h>
+#include <ESP32Servo.h>
+#include <Wire.h>
+#include <Adafruit_MLX90640.h>
+
+// ==================== إعدادات الواي فاي ====================
+// سيتم استخدام هذه الإعدادات من قبل Blynk
+char ssid[] = "TP-Link_C209"; // يجب تغييرها
+char pass[] = "66998464";     // يجب تغييرها
+
+// ==================== تعريفات الأقطاب ====================
+// أقطاب المحركات
+#define RIGHT_MOTOR_IN_A 12 
+#define RIGHT_MOTOR_IN_B 13 
+#define RIGHT_MOTOR_PWM  14 
+#define LEFT_MOTOR_IN_A  25 
+#define LEFT_MOTOR_IN_B  26 
+#define LEFT_MOTOR_PWM   27 
+
+// أقطاب السيرفو
+#define SERVO_PIN 32
+Servo cameraServo;
+
+// متغيرات التحكم
+int motorSpeed = 150; // سرعة المحركات الافتراضية (من 0 إلى 255)
+int servoPos = 90;
+
+// MLX90640
+Adafruit_MLX90640 mlx;
+float mlxFrame[32*24];
+
+// خادم الويب
+WebServer server(80);
+
+// ==================== وظائف المحركات (Blynk) ====================
+
+// دالة موحدة للتحكم في جميع المحركات
+void drive(int ra, int rb, int la, int lb, int speed) {
+  digitalWrite(RIGHT_MOTOR_IN_A, ra);
+  digitalWrite(RIGHT_MOTOR_IN_B, rb);
+  digitalWrite(LEFT_MOTOR_IN_A, la);
+  digitalWrite(LEFT_MOTOR_IN_B, lb);
+  // استخدام analogWrite للتحكم بالسرعة (PWM)
+  analogWrite(RIGHT_MOTOR_PWM, speed);
+  analogWrite(LEFT_MOTOR_PWM, speed);
+}
+
+// أزرار تطبيق الموبايل (Blynk)
+// المنطق هنا هو: HIGH/LOW لليمين أمام، LOW/HIGH لليسار أمام
+// يجب مراجعة هذا المنطق ليتناسب مع توصيلاتك، لكن هذا هو المنطق الذي أرسلته
+BLYNK_WRITE(V0) { // أمام
+  if(param.asInt()) drive(HIGH, LOW, HIGH, LOW, motorSpeed); 
+  else drive(LOW, LOW, LOW, LOW, 0); 
+} 
+BLYNK_WRITE(V1) { // خلف
+  if(param.asInt()) drive(LOW, HIGH, LOW, HIGH, motorSpeed); 
+  else drive(LOW, LOW, LOW, LOW, 0); 
+} 
+BLYNK_WRITE(V2) { // يسار (دوران في المكان)
+  if(param.asInt()) drive(HIGH, LOW, LOW, HIGH, motorSpeed); // يمين أمام، يسار خلف
+  else drive(LOW, LOW, LOW, LOW, 0); 
+} 
+BLYNK_WRITE(V3) { // يمين (دوران في المكان)
+  if(param.asInt()) drive(LOW, HIGH, HIGH, LOW, motorSpeed); // يمين خلف، يسار أمام
+  else drive(LOW, LOW, LOW, LOW, 0); 
+}
+
+// ==================== وظائف السيرفو (WebServer) ====================
+void setServoPosition(int pos) {
+  servoPos = constrain(pos, 0, 180);
+  cameraServo.write(servoPos);
+}
+
+// ==================== معالجات طلبات الويب (WebServer) ====================
+void handleCommand() {
+  if (server.hasArg("servo")) {
+    int pos = server.arg("servo").toInt();
+    setServoPosition(pos);
+    server.send(200, "text/plain", "Servo position set to: " + String(servoPos));
+  } else {
+    server.send(400, "text/plain", "Invalid command");
+  }
+}
+
+// MLX90640 endpoint
+void handleThermal() {
+  if (mlx.getFrame(mlxFrame)) {
+    String payload = "";
+    for (int i = 0; i < 32*24; i++) {
+      payload += String(mlxFrame[i], 1);
+      if (i < 32*24-1) payload += ",";
+    }
+    server.send(200, "text/plain", payload);
+  } else {
+    server.send(500, "text/plain", "Failed to read MLX90640 frame");
+  }
+}
+
+// ==================== صفحة الويب (WebServer) ====================
+const char MAIN_PAGE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تحكم روبوت ESP32</title>
+<style>
+body { font-family: Arial,sans-serif; text-align:center; margin:0; padding:0; background:#f0f0f0; display:flex; flex-direction:column; align-items:center;}
+#video-stream {width:100%; max-width:600px; border:5px solid #333; margin-bottom:20px;}
+#thermal-canvas {width:320px; height:240px; border:5px solid #333; margin-bottom:20px; image-rendering: pixelated;}
+.control-area {display:flex; justify-content:space-around; width:100%; max-width:600px; margin-bottom:20px;}
+.servo-controls {display:flex; flex-direction:column; align-items:center; width:100%; max-width:300px; padding:10px; border:1px solid #ccc; border-radius:8px; background:#fff;}
+</style>
+</head>
+<body>
+
+<h1>تحكم سيارة الروبوت</h1>
+
+<h2>بث الكاميرا</h2>
+<img id="video-stream" src="" alt="Video Stream">
+
+<h2>البث الحراري</h2>
+<canvas id="thermal-canvas" width="32" height="24"></canvas>
+
+<div class="control-area">
+  <div class="servo-controls">
+    <h3>تحكم الكاميرا (سيرفو)</h3>
+    <input type="range" min="0" max="180" value="90" class="slider" id="servo-range">
+    <p>الزاوية: <span id="servo-value">90</span> درجة</p>
+  </div>
+</div>
+
+<script>
+  // يجب تغيير هذا إلى عنوان IP لوحة ESP32-CAM
+  const CAMERA_IP = "YOUR_CAMERA_IP_ADDRESS"; 
+  const CONTROLLER_IP = window.location.hostname;
+
+  document.getElementById('video-stream').src = "http://" + CAMERA_IP + "/stream";
+
+  // إرسال أوامر السيرفو
+  function sendServoCommand(angle){
+    fetch(`http://${CONTROLLER_IP}/command?servo=${angle}`);
+  }
+
+  // تحكم السيرفو بشريط التمرير
+  const servoRange = document.getElementById('servo-range');
+  const servoValue = document.getElementById('servo-value');
+  
+  servoRange.addEventListener('input', e => {
+    const angle = e.target.value;
+    servoValue.textContent = angle;
+    sendServoCommand(angle);
+  });
+  
+  sendServoCommand(servoRange.value);
+
+  // MLX90640 Thermal
+  const thermalCanvas = document.getElementById('thermal-canvas');
+  const ctx = thermalCanvas.getContext('2d');
+  const imgData = ctx.createImageData(32, 24);
+
+  setTimeout(function(){
+    setInterval(updateThermal, 125);
+  }, 500);
+
+  function updateThermal(){
+    fetch(`http://${CONTROLLER_IP}/thermal`)
+      .then(res => res.text())
+      .then(data => {
+        const temps = data.split(',').map(Number);
+        for(let i = 0; i < 32 * 24; i++){
+          const color = tempToColor(temps[i]);
+          imgData.data[i * 4 + 0] = color.r;
+          imgData.data[i * 4 + 1] = color.g;
+          imgData.data[i * 4 + 2] = color.b;
+          imgData.data[i * 4 + 3] = 255; // Alpha
+        }
+        ctx.putImageData(imgData, 0, 0);
+      })
+      .catch(err => console.log("Thermal fetch error", err));
+  }
+
+  function tempToColor(t){
+    const minT = 20, maxT = 40;
+    let ratio = Math.min(Math.max((t - minT) / (maxT - minT), 0), 1);
+    
+    // Simple Blue to Red gradient
+    let r = Math.floor(255 * ratio);
+    let b = Math.floor(255 * (1 - ratio));
+    
+    return {r: r, g: 0, b: b};
+  }
+</script>
+</body>
+</html>
+)rawliteral";
+
+void handleRoot() { server.send(200, "text/html", MAIN_PAGE); }
+
+// ==================== setup & loop ====================
+void setup() {
+  // تخصيص المؤقتات للسيرفو
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  Serial.begin(115200);
+
+  // تهيئة أقطاب المحركات
+  pinMode(RIGHT_MOTOR_IN_A, OUTPUT);
+  pinMode(RIGHT_MOTOR_IN_B, OUTPUT);
+  pinMode(RIGHT_MOTOR_PWM, OUTPUT);
+  pinMode(LEFT_MOTOR_IN_A, OUTPUT);
+  pinMode(LEFT_MOTOR_IN_B, OUTPUT);
+  pinMode(LEFT_MOTOR_PWM, OUTPUT);
+  drive(LOW, LOW, LOW, LOW, 0); // إيقاف المحركات عند البدء
+
+  // تهيئة السيرفو
+  cameraServo.attach(SERVO_PIN);
+  setServoPosition(servoPos);
+
+  // توصيل الواي فاي عبر Blynk
+  Blynk.begin(BLYNK_AUTH_TOKEN, ssid, pass);
+  // لا حاجة لـ WiFi.begin() أو حلقة الانتظار، Blynk تتولى الأمر
+
+  // تهيئة MLX90640
+  Wire.begin();
+  if (!mlx.begin()) { Serial.println("MLX90640 not found!"); while (1) delay(10); }
+  Serial.println("MLX90640 online!");
+  mlx.setMode(MLX90640_INTERLEAVED);
+  mlx.setResolution(MLX90640_ADC_18BIT);
+  mlx.setRefreshRate(MLX90640_8_HZ);
+
+  // إعداد معالجات الويب
+  server.on("/", handleRoot);
+  server.on("/command", handleCommand);
+  server.on("/thermal", handleThermal);
+  server.begin();
+}
+
+void loop() {
+  Blynk.run(); // تشغيل Blynk للتحكم بالمحركات
+  server.handleClient(); // تشغيل خادم الويب للسيرفو والكاميرا
+}
